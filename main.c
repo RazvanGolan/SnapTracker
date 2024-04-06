@@ -11,13 +11,14 @@
 
 typedef struct{
 
-  char name[50];
+  char name[100];
   off_t size;
   time_t modified; /* time of last modification */
   ino_t inode;
   mode_t mode;        /* file type and mode */
   char modifiedChar[100]; //the modified field in human-readable format
   char permissions[50];
+  char path[100];
 }MetaData;
 
 void printMetaData(MetaData metadata, FILE *file)
@@ -28,7 +29,8 @@ void printMetaData(MetaData metadata, FILE *file)
   } else {
     output = stdout;
   }
-  
+
+  fprintf(output, "Path: %s\n", metadata.path);
   fprintf(output, "Name: %s\n", metadata.name);
   fprintf(output, "Size: %lld bytes\n", metadata.size);
   fprintf(output, "Last Modified: %s\n", metadata.modifiedChar);
@@ -84,11 +86,53 @@ MetaData makeMetaData(char *path, struct dirent* dirData)
   mode_t permissions = statData.st_mode & 0777;
   char *permission_str = permissionToString(permissions);
   strcpy(metadata.permissions, permission_str);
+
+  strcpy(metadata.path, path);
   
   return metadata;
 }
 
-void makeSnapshot(char *path, MetaData metadata, char *name)
+MetaData parseMetaDataFromFile(const char *file_path)
+{
+  MetaData metadata;
+  FILE *file = fopen(file_path, "r");
+  if (file == NULL) {
+    perror("fopen");
+    exit(-5);
+  }
+
+  char line[50];
+  while (fgets(line, 100, file) != NULL) {
+    // Check each line for the relevant data
+    if (strncmp(line, "Name:", 5) == 0) {
+      sscanf(line, "Name: %[^\n]", metadata.name);
+    } else if (strncmp(line, "Size:", 5) == 0) {
+      sscanf(line, "Size: %lld bytes", &metadata.size);
+    } else if (strncmp(line, "Inode:", 6) == 0) {
+      sscanf(line, "Inode: %llu", &metadata.inode);
+    } else if (strncmp(line, "Permissions:", 12) == 0) {
+      sscanf(line, "Permissions: %[^\n]", metadata.permissions);
+    }
+  }
+  strcpy(metadata.modifiedChar, "x"); // i don't care for this when i compare the two metadas
+  strcpy(metadata.path, file_path);
+  
+  fclose(file);
+  return metadata;
+}
+
+int compareMetaData(MetaData new, MetaData old)
+{
+  if(strcmp(new.name, old.name))  return 1;
+  
+  if(new.size != old.size) return 1;
+  if(new.inode != old.inode) return 1;
+  if(strcmp(new.permissions, old.permissions)) return 1;
+
+  return 0;
+}
+
+void makeSnapshot(char *path, MetaData metadata)
 {
   char *directory = dirname(strdup(path)); //i get the name of the dir
   // here i modify the path sa that i can use it as a name for the file
@@ -103,6 +147,34 @@ void makeSnapshot(char *path, MetaData metadata, char *name)
   strcat(snapshot_char, "_snapshot.txt");
   char output_file_path[strlen(directory) + strlen(snapshot_char) + 1];
   sprintf(output_file_path, "%s%s", directory, snapshot_char);
+
+  // Check if the snapshot exists
+  struct stat file_stat;
+  if (stat(output_file_path, &file_stat) == 0) {
+    // Snapshot exists 
+    MetaData newMetaData = parseMetaDataFromFile(output_file_path);
+    if(compareMetaData(newMetaData, metadata) != 0) // there are changes
+      {
+	int file_descriptor = open(output_file_path, O_WRONLY);
+	if (file_descriptor == -1) {
+	  perror("open snapshot");
+	  exit(-4); 
+	}
+
+	FILE *file = fdopen(file_descriptor, "w");
+	if (file == NULL) {
+	  perror("fdopen");
+	  close(file_descriptor); // Close the snapshot file
+	  exit(-5);
+	}
+	
+	printMetaData(metadata, file);
+	fclose(file);
+      }
+    
+    return;
+  }
+  // Snapshot does not exist
   
   int snapshot_file = open(output_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if(snapshot_file == -1)
@@ -138,6 +210,9 @@ void readDir(char *path)
     {
       if(dirData->d_name[0] == '.')
 	continue;
+
+      if(strstr(dirData->d_name, "_snapshot.txt")) // skip the snapshots
+	continue;
       
       char pathCurrent[257];
       sprintf(pathCurrent, "%s/%s", path, dirData->d_name);
@@ -150,7 +225,7 @@ void readDir(char *path)
 	{
 	  MetaData metadata = makeMetaData(pathCurrent, dirData);
 	  //printMetaData(metadata, NULL);
-	  makeSnapshot(pathCurrent, metadata, dirData->d_name);
+	  makeSnapshot(pathCurrent, metadata);
 	}
 
 
