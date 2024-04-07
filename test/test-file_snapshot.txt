@@ -1,0 +1,6 @@
+Path: test/file
+Name: file
+Size: 17 bytes
+Last Modified: 2024-04-07 06:32:13
+Inode: 50473922
+Permissions: rw-r--r--

@@ -1,13 +1,15 @@
 #include <stdio.h>
-#include<stdlib.h>
-#include<dirent.h>
-#include<string.h>
+#include <stdlib.h>
+#include <dirent.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include<time.h>
+#include <time.h>
 #include <fcntl.h> 
 #include <libgen.h>
+
+#define MAX_NUMBER_OF_DIRECTORIES 10
 
 typedef struct{
 
@@ -23,23 +25,61 @@ typedef struct{
 
 void printMetaData(MetaData metadata, FILE *file)
 {
-  FILE *output; // makes the output stdout if i don't give it a file
-  if (file != NULL) { 
-    output = file;
-  } else {
-    output = stdout;
-  }
+    int fd;  // makes the output stdout if i don't give it a file
+    if (file != NULL) {
+        fd = fileno(file);
+    } else {
+      fd = STDOUT_FILENO;
+    }
 
-  fprintf(output, "Path: %s\n", metadata.path);
-  fprintf(output, "Name: %s\n", metadata.name);
-  fprintf(output, "Size: %lld bytes\n", metadata.size);
-  fprintf(output, "Last Modified: %s\n", metadata.modifiedChar);
-  fprintf(output, "Inode: %llu\n", metadata.inode);
-  fprintf(output, "Permissions: %s\n", metadata.permissions);
+    char buffer[512]; // Buffer to hold formatted strings
+    int n; // Variable to store number of bytes written
 
-  if (file != NULL && file != stdout) {
-    fclose(output); // Close the file if it's not standard output
-  }
+    n = snprintf(buffer, sizeof(buffer), "Path: %s\n", metadata.path);
+    if(write(fd, buffer, n) == -1)
+      {
+	perror("Write failed\n");
+	exit(-6);
+      }
+
+    n = snprintf(buffer, sizeof(buffer), "Name: %s\n", metadata.name);
+    if(write(fd, buffer, n) == -1)
+      {
+	perror("Write failed\n");
+	exit(-6);
+      }
+
+    n = snprintf(buffer, sizeof(buffer), "Size: %lld bytes\n", metadata.size);
+    if(write(fd, buffer, n) == -1)
+      {
+	perror("Write failed\n");
+	exit(-6);
+      }
+
+    n = snprintf(buffer, sizeof(buffer), "Last Modified: %s\n", metadata.modifiedChar);
+    if(write(fd, buffer, n) == -1)
+      {
+	perror("Write failed\n");
+	exit(-6);
+      }
+
+    n = snprintf(buffer, sizeof(buffer), "Inode: %llu\n", metadata.inode);
+    if(write(fd, buffer, n) == -1)
+      {
+	perror("Write failed\n");
+	exit(-6);
+      }
+
+    n = snprintf(buffer, sizeof(buffer), "Permissions: %s\n", metadata.permissions);
+    if(write(fd, buffer, n) == -1)
+      {
+	perror("Write failed\n");
+	exit(-6);
+      }
+
+    if (file != NULL && file != stdout) {
+        fclose(file); // Close the file if it's not standard output
+    }
 }
 
 char *permissionToString(mode_t mode) {
@@ -235,8 +275,45 @@ void readDir(char *path)
 
 int main(int argc, char** argv)
 {
+  int number_directories = 0;
+  char dirNames[10][50];
+
+  for(int i = 1; i < argc; i++)
+    {
+      struct stat argv_stat;
+      if(lstat(argv[i], &argv_stat) == -1)
+	{
+	  perror("Stat failed\n");
+	  exit(-3);
+	}
+
+      if (S_ISDIR(argv_stat.st_mode))
+	{
+	  if(number_directories == MAX_NUMBER_OF_DIRECTORIES) // check if there are more directories than maximum number
+	    {
+	      perror("Too many directories");
+	      exit(-1);
+	    }
+
+	  strcpy(dirNames[number_directories], argv[i]);
+	  number_directories++;
+	  
+	  for(int j = 0; j < number_directories - 1; j++) // check if there are no duplicates
+	    {
+	      if(strcmp(dirNames[j], dirNames[number_directories - 1]) == 0)
+		{
+		  perror("Same directory was given mutiple times");
+		  exit(-2);
+		}
+	    }
+	}
+    }
+
+  for(int i = 0; i < number_directories; i++)
+    {
+      readDir(dirNames[i]); // arguments are well given
+    }
   
-  readDir(argv[1]);
 
   return 0;
 }
