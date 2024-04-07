@@ -8,19 +8,26 @@
 #include <time.h>
 #include <fcntl.h> 
 #include <libgen.h>
+#include <stddef.h> // for char * = NULL
 
 #define MAX_NUMBER_OF_DIRECTORIES 10
+#define MAX_DIRECTORY_NAME 50
+#define MAX_FILE_NAME 100
+#define MAX_MODIFIED_LENGTH 100
+#define MAX_PERMISSIONS_LENGTH 50
+#define MAX_PATH_LENGTH 100
+#define BUFFER_SIZE 512
 
 typedef struct{
 
-  char name[100];
+  char name[MAX_FILE_NAME];
   off_t size;
   time_t modified; /* time of last modification */
   ino_t inode;
   mode_t mode;        /* file type and mode */
-  char modifiedChar[100]; //the modified field in human-readable format
-  char permissions[50];
-  char path[100];
+  char modifiedChar[MAX_MODIFIED_LENGTH]; //the modified field in human-readable format
+  char permissions[MAX_PERMISSIONS_LENGTH];
+  char path[MAX_PATH_LENGTH];
 }MetaData;
 
 void printMetaData(MetaData metadata, FILE *file)
@@ -32,7 +39,7 @@ void printMetaData(MetaData metadata, FILE *file)
       fd = STDOUT_FILENO;
     }
 
-    char buffer[512]; // Buffer to hold formatted strings
+    char buffer[BUFFER_SIZE]; // Buffer to hold formatted strings
     int n; // Variable to store number of bytes written
 
     n = snprintf(buffer, sizeof(buffer), "Path: %s\n", metadata.path);
@@ -182,7 +189,7 @@ void makeSnapshot(char *path, MetaData metadata)
       path[i] = '-';
     }
   }
-  char snapshot_char[100] = "/";
+  char snapshot_char[MAX_FILE_NAME] = "/";
   strcat(snapshot_char, path);
   strcat(snapshot_char, "_snapshot.txt");
   char output_file_path[strlen(directory) + strlen(snapshot_char) + 1];
@@ -235,7 +242,29 @@ void makeSnapshot(char *path, MetaData metadata)
   fclose(file);
 }
 
-void readDir(char *path)
+void appendOutputFile(MetaData metadata, char *output_file)
+{
+  int file_descriptor = open(output_file, O_WRONLY | O_APPEND | O_CREAT, 0644);
+  if (file_descriptor == -1)
+    {
+      perror("open");
+      exit(-1); // Error opening file
+    }
+
+  FILE *file = fdopen(file_descriptor, "a"); // append
+  if (file == NULL)
+    {
+      perror("fdopen");
+      close(file_descriptor); // Close file descriptor if fdopen fails
+      exit(-1);
+    }
+
+  printMetaData(metadata, file);
+  
+  fclose(file);
+}
+
+void readDir(char *path, char *output_file)
 {
   DIR *dir = opendir(path);
   if(dir == NULL)
@@ -259,13 +288,20 @@ void readDir(char *path)
       
       if(dirData->d_type==DT_DIR)
 	{
-	  readDir(pathCurrent);
+	  readDir(pathCurrent, output_file);
 	}
       if(dirData->d_type==DT_REG)
 	{
 	  MetaData metadata = makeMetaData(pathCurrent, dirData);
-	  //printMetaData(metadata, NULL);
-	  makeSnapshot(pathCurrent, metadata);
+
+	  if(output_file[0] == '\0')
+	    {
+	      makeSnapshot(pathCurrent, metadata); // there is no output file
+	    }
+	  else
+	    {
+	      appendOutputFile(metadata, output_file); // write just in output file
+	    }
 	}
 
 
@@ -273,12 +309,11 @@ void readDir(char *path)
     closedir(dir);
 }
 
-int main(int argc, char** argv)
+int checkDirectories(char **argv, int argc, int start, char dirNames [MAX_NUMBER_OF_DIRECTORIES][MAX_DIRECTORY_NAME])
 {
   int number_directories = 0;
-  char dirNames[10][50];
-
-  for(int i = 1; i < argc; i++)
+  
+    for(int i = start; i < argc; i++)
     {
       struct stat argv_stat;
       if(lstat(argv[i], &argv_stat) == -1)
@@ -309,11 +344,38 @@ int main(int argc, char** argv)
 	}
     }
 
+    return number_directories;
+}
+
+int main(int argc, char** argv)
+{
+  int number_directories = 0;
+  char output_file[MAX_DIRECTORY_NAME] = "";
+  char dirNames [MAX_NUMBER_OF_DIRECTORIES][MAX_DIRECTORY_NAME];
+
+  if(strcmp(argv[1], "-o") == 0)
+    {
+      strcpy(output_file, argv[2]);
+      number_directories = checkDirectories(argv, argc, 3, dirNames); //if there is an ouput file, than the directories start from argv[3]
+      
+      int file_descriptor = open(output_file, O_TRUNC); // if there is a file delete it's content
+      if (file_descriptor == -1)
+	{
+	  perror("open");
+	  exit(-1); // Error opening file
+	}
+      close(file_descriptor);
+    }
+  else
+    {
+      number_directories = checkDirectories(argv, argc, 1, dirNames);
+    }
+
   for(int i = 0; i < number_directories; i++)
     {
-      readDir(dirNames[i]); // arguments are well given
+      readDir(dirNames[i], output_file); // arguments are well given
     }
   
-
+  
   return 0;
 }
