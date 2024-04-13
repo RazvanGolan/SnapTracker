@@ -210,7 +210,7 @@ void makeSnapshot(char *path, MetaData metadata, char *output_dir)
   strcat(snapshot_char, path);
   strcat(snapshot_char, "_snapshot.txt");
   char output_file_path[strlen(directory) + strlen(snapshot_char) + 1];
-  sprintf(output_file_path, "%s%s", directory, snapshot_char); // the output_file_path has the following fromat path/path-name_of_file_snapshot.txt
+  sprintf(output_file_path, "%s%s", directory, snapshot_char); // the output_file_path has the following format path/path-name_of_file_snapshot.txt
   
   // Check if the snapshot exists
   struct stat file_stat;
@@ -361,7 +361,32 @@ int main(int argc, char** argv)
 
   for(int i = 0; i < number_directories; i++)
     {
-      readDir(dirNames[i], output_dir); // arguments are well given
+      pid_t pid = fork();
+      if (pid == -1) {
+	perror("fork");
+	exit(-1);
+      } else if (pid == 0) {
+	// Child process
+	readDir(dirNames[i], output_dir); // arguments are well given
+	printf("\nSnapshot for %s created successfully.\n", dirNames[i]);
+	exit(0);
+      }
+    }
+  
+  // Parent process: Wait for all child processes to complete
+  for (int i = 0; i < number_directories; i++)
+    {
+      int status;
+      pid_t child_pid = wait(&status);
+      
+      if (WIFEXITED(status))
+	{
+	  printf("\nChild Process %d terminated with PID %d and exit code %d.\n", i + 1, child_pid, WEXITSTATUS(status));
+	}
+      else
+	{
+	  printf("\nChild Process %d with PID %d did not exit normally.\n", i + 1, child_pid);
+	}
     }
   
   

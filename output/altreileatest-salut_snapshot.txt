@@ -1,0 +1,6 @@
+Path: altreileatest/salut
+Name: salut
+Size: 12 bytes
+Last Modified: 2024-04-07 06:57:08
+Inode: 50475123
+Permissions: rw-r--r--

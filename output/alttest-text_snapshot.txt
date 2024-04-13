@@ -1,0 +1,6 @@
+Path: alttest/text
+Name: text
+Size: 41 bytes
+Last Modified: 2024-04-07 06:56:44
+Inode: 50475092
+Permissions: rw-r--r--
