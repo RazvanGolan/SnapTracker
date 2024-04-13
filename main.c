@@ -8,7 +8,6 @@
 #include <time.h>
 #include <fcntl.h> 
 #include <libgen.h>
-#include <stddef.h> // for char * = NULL
 
 #define MAX_NUMBER_OF_DIRECTORIES 10
 #define MAX_DIRECTORY_NAME 50
@@ -29,6 +28,15 @@ typedef struct{
   char permissions[MAX_PERMISSIONS_LENGTH];
   char path[MAX_PATH_LENGTH];
 }MetaData;
+
+int checkDirectories(char **argv, int argc, int start, char dirNames [MAX_NUMBER_OF_DIRECTORIES][MAX_DIRECTORY_NAME]); // check if the directories given resepect the requirements, puts their names in dirNames and returns the number of directories
+void readDir(char *path, char *output_dir); // opens the directory and reads all the files
+MetaData makeMetaData(char *path, struct dirent* dirData); // returns a MetaData from the file's path given
+void makeSnapshot(char *path, MetaData metadata, char *output_dir); // makes the snapshot file or updates the already existing one if there are changes
+MetaData parseMetaDataFromFile(const char *file_path); // returns a MetaData from a given file
+int compareMetaData(MetaData new, MetaData old); // compares two metadatas
+void printMetaData(MetaData metadata, FILE *file); // prints the metadata in the given file, if there is none given it will print to stdout
+char *permissionToString(mode_t mode); // returns a human-readable string with the file permissions
 
 void printMetaData(MetaData metadata, FILE *file)
 {
@@ -179,22 +187,31 @@ int compareMetaData(MetaData new, MetaData old)
   return 0;
 }
 
-void makeSnapshot(char *path, MetaData metadata)
+void makeSnapshot(char *path, MetaData metadata, char *output_dir)
 {
-  char *directory = dirname(strdup(path)); //i get the name of the dir
-  // here i modify the path sa that i can use it as a name for the file
-  //so that there will be no duplicates when i give multiple direcotires
+  char directory[MAX_DIRECTORY_NAME];
+  if(output_dir[0] == '\0') // if there is not output_dir
+    {
+      strcpy(directory, dirname(strdup(path))); //i get the name of the dir
+    }
+  else
+    {
+      strcpy(directory, output_dir);
+    }
+  
+   // here i modify the path sa that i can use it as a name for the file so that there will be no duplicates when i give multiple direcotires
   for (int i = 0; path[i] != '\0'; i++) { 
     if (path[i] == '/') {
       path[i] = '-';
     }
   }
+  
   char snapshot_char[MAX_FILE_NAME] = "/";
   strcat(snapshot_char, path);
   strcat(snapshot_char, "_snapshot.txt");
   char output_file_path[strlen(directory) + strlen(snapshot_char) + 1];
-  sprintf(output_file_path, "%s%s", directory, snapshot_char);
-
+  sprintf(output_file_path, "%s%s", directory, snapshot_char); // the output_file_path has the following fromat path/path-name_of_file_snapshot.txt
+  
   // Check if the snapshot exists
   struct stat file_stat;
   if (stat(output_file_path, &file_stat) == 0) {
@@ -242,34 +259,13 @@ void makeSnapshot(char *path, MetaData metadata)
   fclose(file);
 }
 
-void appendOutputFile(MetaData metadata, char *output_file)
-{
-  int file_descriptor = open(output_file, O_WRONLY | O_APPEND | O_CREAT, 0644);
-  if (file_descriptor == -1)
-    {
-      perror("open");
-      exit(-1); // Error opening file
-    }
 
-  FILE *file = fdopen(file_descriptor, "a"); // append
-  if (file == NULL)
-    {
-      perror("fdopen");
-      close(file_descriptor); // Close file descriptor if fdopen fails
-      exit(-1);
-    }
-
-  printMetaData(metadata, file);
-  
-  fclose(file);
-}
-
-void readDir(char *path, char *output_file)
+void readDir(char *path, char *output_dir)
 {
   DIR *dir = opendir(path);
   if(dir == NULL)
     {
-      perror("File open error");
+      perror("Dir open error");
       exit(-1);
     }
   
@@ -285,25 +281,17 @@ void readDir(char *path, char *output_file)
       
       char pathCurrent[257];
       sprintf(pathCurrent, "%s/%s", path, dirData->d_name);
-      
+     
       if(dirData->d_type==DT_DIR)
 	{
-	  readDir(pathCurrent, output_file);
+	  readDir(pathCurrent, output_dir);
 	}
       if(dirData->d_type==DT_REG)
 	{
 	  MetaData metadata = makeMetaData(pathCurrent, dirData);
 
-	  if(output_file[0] == '\0')
-	    {
-	      makeSnapshot(pathCurrent, metadata); // there is no output file
-	    }
-	  else
-	    {
-	      appendOutputFile(metadata, output_file); // write just in output file
-	    }
+	  makeSnapshot(pathCurrent, metadata, output_dir); // there is no output file  
 	}
-
 
     }
     closedir(dir);
@@ -350,21 +338,21 @@ int checkDirectories(char **argv, int argc, int start, char dirNames [MAX_NUMBER
 int main(int argc, char** argv)
 {
   int number_directories = 0;
-  char output_file[MAX_DIRECTORY_NAME] = "";
+  char output_dir[MAX_DIRECTORY_NAME] = "";
   char dirNames [MAX_NUMBER_OF_DIRECTORIES][MAX_DIRECTORY_NAME];
 
   if(strcmp(argv[1], "-o") == 0)
     {
-      strcpy(output_file, argv[2]);
+      strcpy(output_dir, argv[2]);
       number_directories = checkDirectories(argv, argc, 3, dirNames); //if there is an ouput file, than the directories start from argv[3]
       
-      int file_descriptor = open(output_file, O_TRUNC); // if there is a file delete it's content
-      if (file_descriptor == -1)
+      DIR *dir = opendir(argv[2]);
+      if (dir == NULL)
 	{
-	  perror("open");
-	  exit(-1); // Error opening file
+	  perror("Open dir error");
+	  exit(-1);
 	}
-      close(file_descriptor);
+      closedir(dir);
     }
   else
     {
@@ -373,7 +361,7 @@ int main(int argc, char** argv)
 
   for(int i = 0; i < number_directories; i++)
     {
-      readDir(dirNames[i], output_file); // arguments are well given
+      readDir(dirNames[i], output_dir); // arguments are well given
     }
   
   
