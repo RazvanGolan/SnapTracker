@@ -1,0 +1,6 @@
+Path: test/text
+Name: text
+Size: 5 bytes
+Last Modified: 2024-04-07 06:33:35
+Inode: 50474032
+Permissions: rw-rw-rw-

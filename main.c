@@ -30,13 +30,14 @@ typedef struct{
 }MetaData;
 
 int checkDirectories(char **argv, int argc, int start, char dirNames [MAX_NUMBER_OF_DIRECTORIES][MAX_DIRECTORY_NAME]); // check if the directories given resepect the requirements, puts their names in dirNames and returns the number of directories
-void readDir(char *path, char *output_dir); // opens the directory and reads all the files
+void readDir(char *path, char *output_dir, char *izolated_space_dir); // opens the directory and reads all the files
 MetaData makeMetaData(char *path, struct dirent* dirData); // returns a MetaData from the file's path given
 void makeSnapshot(char *path, MetaData metadata, char *output_dir); // makes the snapshot file or updates the already existing one if there are changes
 MetaData parseMetaDataFromFile(const char *file_path); // returns a MetaData from a given file
 int compareMetaData(MetaData new, MetaData old); // compares two metadatas
 void printMetaData(MetaData metadata, int fd); // prints the metadata in the given file, if there is none given it will print to stdout
 char *permissionToString(mode_t mode); // returns a human-readable string with the file permissions
+int analyze_file(char *pathCurrent, char *izolated_space_dir); // executes the script and moves the file if it is dangerous
 
 void printMetaData(MetaData metadata, int fd)
 {
@@ -152,8 +153,9 @@ MetaData parseMetaDataFromFile(const char *file_path)
 
   char line[BUFFER_SIZE];
   ssize_t bytes_read;
-  while ((bytes_read = read(file_descriptor, line, sizeof(line))) > 0) {
-    // Check each line for the relevant data
+  while ((bytes_read = read(file_descriptor, line, sizeof(line))) > 0) // reads a BUFFER_SIZE chunck from the file
+    {
+    // check each line for the relevant data
     if (strncmp(line, "Name:", 5) == 0) {
       sscanf(line, "Name: %[^\n]", metadata.name);
     } else if (strncmp(line, "Size:", 5) == 0) {
@@ -186,7 +188,7 @@ int compareMetaData(MetaData new, MetaData old)
 void makeSnapshot(char *path, MetaData metadata, char *output_dir)
 {
   char directory[MAX_DIRECTORY_NAME];
-  if(output_dir[0] == '\0') // if there is not output_dir
+  if(output_dir[0] == '\0') // if there is no output_dir
     {
       strcpy(directory, dirname(strdup(path))); //i get the name of the dir
     }
@@ -241,8 +243,61 @@ void makeSnapshot(char *path, MetaData metadata, char *output_dir)
   close(snapshot_file);
 }
 
+int analyze_file(char *pathCurrent, char *izolated_space_dir)
+{
+  pid_t pid = fork();
 
-void readDir(char *path, char *output_dir)
+  if (pid < 0)
+    {
+      perror("fork");
+      exit(-1);
+    }
+  else if (pid == 0)
+    {
+      // Child process
+      execl("/bin/bash", "/bin/bash", "analyze_file.sh", pathCurrent, NULL);
+      // If execl fails, it will not return
+      perror("execl");
+      exit(-1);
+    }
+  else
+    {
+      // Parent process
+      int status;
+      waitpid(pid, &status, 0);
+      if (WIFEXITED(status))
+	{
+	  if(WEXITSTATUS(status) > 0)
+	    {
+	      char *last_slash = strrchr(pathCurrent, '/');
+	      char *file_name = (last_slash != NULL) ? last_slash + 1 : pathCurrent;
+	      char new_file_path[MAX_FILE_NAME];
+	      snprintf(new_file_path, sizeof(new_file_path), "%s/%s", izolated_space_dir, file_name);
+
+	      // Move the file to the directory
+	      if (rename(pathCurrent, new_file_path) != 0) {
+		perror("rename");
+		exit(-4);
+	      }
+    
+	      return 1;
+	    }
+	  else if(WEXITSTATUS(status) == 0)
+	    {
+	      return 0; // it is not dangerous
+	    }
+	  else
+	    {
+	      perror("script failed");
+	      exit(WEXITSTATUS(status));
+	    }
+	}
+    }
+  
+  return 0;
+}
+
+void readDir(char *path, char *output_dir, char *izolated_space_dir)
 {
   DIR *dir = opendir(path);
   if(dir == NULL)
@@ -266,13 +321,37 @@ void readDir(char *path, char *output_dir)
      
       if(dirData->d_type==DT_DIR)
 	{
-	  readDir(pathCurrent, output_dir);
+	  readDir(pathCurrent, output_dir, izolated_space_dir);
 	}
       if(dirData->d_type==DT_REG)
 	{
-	  MetaData metadata = makeMetaData(pathCurrent, dirData);
-
-	  makeSnapshot(pathCurrent, metadata, output_dir); // there is no output file  
+	  struct stat statData;
+	  int data = lstat(pathCurrent, &statData);
+	  
+	  if(data == -1)
+	    {
+	      perror("Stat failed\n");
+	      exit(-3);
+	    }
+	  
+	  mode_t permissions = statData.st_mode & 0777;
+	  char *permission_str = permissionToString(permissions);
+	  
+	  if(strcmp(permission_str, "---------") == 0)
+	    {
+	      if(analyze_file(pathCurrent, izolated_space_dir) == 0)
+		{
+		  // it is not dangerous
+		  MetaData metadata = makeMetaData(pathCurrent, dirData);
+		  makeSnapshot(pathCurrent, metadata, output_dir);
+		}
+	    }
+	  else
+	    {
+	      MetaData metadata = makeMetaData(pathCurrent, dirData);
+	      makeSnapshot(pathCurrent, metadata, output_dir);
+	    }
+	
 	}
 
     }
@@ -282,6 +361,12 @@ void readDir(char *path, char *output_dir)
 int checkDirectories(char **argv, int argc, int start, char dirNames [MAX_NUMBER_OF_DIRECTORIES][MAX_DIRECTORY_NAME])
 {
   int number_directories = 0;
+
+  if(argc <= start)
+    {
+      perror("No directories given");
+      exit(-1);
+    }
   
     for(int i = start; i < argc; i++)
     {
@@ -321,12 +406,13 @@ int main(int argc, char** argv)
 {
   int number_directories = 0;
   char output_dir[MAX_DIRECTORY_NAME] = "";
+  char izolated_space_dir[MAX_DIRECTORY_NAME];
   char dirNames [MAX_NUMBER_OF_DIRECTORIES][MAX_DIRECTORY_NAME];
 
   if(strcmp(argv[1], "-o") == 0)
     {
       strcpy(output_dir, argv[2]);
-      number_directories = checkDirectories(argv, argc, 3, dirNames); //if there is an ouput file, than the directories start from argv[3]
+      number_directories = checkDirectories(argv, argc, 5, dirNames); //if there is an ouput file, than the directories start from argv[5]
       
       DIR *dir = opendir(argv[2]);
       if (dir == NULL)
@@ -335,10 +421,13 @@ int main(int argc, char** argv)
 	  exit(-1);
 	}
       closedir(dir);
+
+      strcpy(izolated_space_dir, argv[4]);
     }
   else
     {
-      number_directories = checkDirectories(argv, argc, 1, dirNames);
+      number_directories = checkDirectories(argv, argc, 3, dirNames); // if there is no output file, than the directories start after izolated_space_dir which is argv[2]
+      strcpy(izolated_space_dir, argv[2]);
     }
 
   for(int i = 0; i < number_directories; i++)
@@ -349,7 +438,7 @@ int main(int argc, char** argv)
 	exit(-1);
       } else if (pid == 0) {
 	// Child process
-	readDir(dirNames[i], output_dir); // arguments are well given
+	readDir(dirNames[i], output_dir, izolated_space_dir); // arguments are well given
 	printf("\nSnapshot for %s created successfully.\n", dirNames[i]);
 	exit(0);
       }
