@@ -1,7 +1,6 @@
 Path: test/file
 Name: file
-Size: 0 bytes
-Last Modified: 2024-04-13 07:16:26
-Inode: 51119872
+Size: 24 bytes
+Last Modified: 2024-04-19 06:25:12
+Inode: 51973816
 Permissions: rw-r--r--
-

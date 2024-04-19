@@ -35,17 +35,15 @@ MetaData makeMetaData(char *path, struct dirent* dirData); // returns a MetaData
 void makeSnapshot(char *path, MetaData metadata, char *output_dir); // makes the snapshot file or updates the already existing one if there are changes
 MetaData parseMetaDataFromFile(const char *file_path); // returns a MetaData from a given file
 int compareMetaData(MetaData new, MetaData old); // compares two metadatas
-void printMetaData(MetaData metadata, FILE *file); // prints the metadata in the given file, if there is none given it will print to stdout
+void printMetaData(MetaData metadata, int fd); // prints the metadata in the given file, if there is none given it will print to stdout
 char *permissionToString(mode_t mode); // returns a human-readable string with the file permissions
 
-void printMetaData(MetaData metadata, FILE *file)
+void printMetaData(MetaData metadata, int fd)
 {
-    int fd;  // makes the output stdout if i don't give it a file
-    if (file != NULL) {
-        fd = fileno(file);
-    } else {
-      fd = STDOUT_FILENO;
-    }
+  // makes the output stdout if i don't give it a file
+    if (fd == 0) 
+        fd = STDOUT_FILENO;
+    
 
     char buffer[BUFFER_SIZE]; // Buffer to hold formatted strings
     int n; // Variable to store number of bytes written
@@ -91,10 +89,6 @@ void printMetaData(MetaData metadata, FILE *file)
 	perror("Write failed\n");
 	exit(-6);
       }
-
-    if (file != NULL && file != stdout) {
-        fclose(file); // Close the file if it's not standard output
-    }
 }
 
 char *permissionToString(mode_t mode) {
@@ -150,14 +144,15 @@ MetaData makeMetaData(char *path, struct dirent* dirData)
 MetaData parseMetaDataFromFile(const char *file_path)
 {
   MetaData metadata;
-  FILE *file = fopen(file_path, "r");
-  if (file == NULL) {
-    perror("fopen");
+  int file_descriptor = open(file_path, O_RDONLY);
+  if (file_descriptor == -1) {
+    perror("open");
     exit(-5);
   }
 
-  char line[50];
-  while (fgets(line, 100, file) != NULL) {
+  char line[BUFFER_SIZE];
+  ssize_t bytes_read;
+  while ((bytes_read = read(file_descriptor, line, sizeof(line))) > 0) {
     // Check each line for the relevant data
     if (strncmp(line, "Name:", 5) == 0) {
       sscanf(line, "Name: %[^\n]", metadata.name);
@@ -169,10 +164,11 @@ MetaData parseMetaDataFromFile(const char *file_path)
       sscanf(line, "Permissions: %[^\n]", metadata.permissions);
     }
   }
+    
   strcpy(metadata.modifiedChar, "x"); // i don't care for this when i compare the two metadas
   strcpy(metadata.path, file_path);
   
-  fclose(file);
+  close(file_descriptor);
   return metadata;
 }
 
@@ -224,16 +220,9 @@ void makeSnapshot(char *path, MetaData metadata, char *output_dir)
 	  perror("open snapshot");
 	  exit(-4); 
 	}
-
-	FILE *file = fdopen(file_descriptor, "w");
-	if (file == NULL) {
-	  perror("fdopen");
-	  close(file_descriptor); // Close the snapshot file
-	  exit(-5);
-	}
-	
-	printMetaData(metadata, file);
-	fclose(file);
+      
+	printMetaData(metadata, file_descriptor);
+	close(file_descriptor);
       }
     
     return;
@@ -247,16 +236,9 @@ void makeSnapshot(char *path, MetaData metadata, char *output_dir)
       exit(-4);
     }
 
-  FILE *file = fdopen(snapshot_file, "w");
-  if (file == NULL) {
-    perror("fdopen");
-    close(snapshot_file); // Close the snapshot file
-    exit(-5);
-  }
-
-  printMetaData(metadata, file);
+  printMetaData(metadata, snapshot_file);
   
-  fclose(file);
+  close(snapshot_file);
 }
 
 
