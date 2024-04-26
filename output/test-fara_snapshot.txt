@@ -1,0 +1,6 @@
+Path: test/fara
+Name: fara
+Size: 0 bytes
+Last Modified: 2024-04-19 07:32:16
+Inode: 51977232
+Permissions: ---------
