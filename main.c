@@ -448,6 +448,12 @@ int main(int argc, char** argv)
   char izolated_space_dir[MAX_DIRECTORY_NAME];
   char dirNames [MAX_NUMBER_OF_DIRECTORIES][MAX_DIRECTORY_NAME];
 
+  if(argc < 3)
+    {
+      perror("Too few arguments");
+      exit(-1);
+    }
+  
   if(strcmp(argv[1], "-o") == 0)
     {
       strcpy(output_dir, argv[2]);
