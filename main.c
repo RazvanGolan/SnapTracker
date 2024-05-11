@@ -39,6 +39,7 @@ void printMetaData(MetaData metadata, int fd); // Prints the metadata in the giv
 char *permissionToString(mode_t mode); // Returns a human-readable string with the file permissions
 int analyze_file(char *pathCurrent, char *izolated_space_dir); // Executes the script and moves the file if it is dangerous
 
+
 void printMetaData(MetaData metadata, int fd)
 {
   // Makes the output stdout if i don't give it a file
@@ -146,28 +147,109 @@ MetaData parseMetaDataFromFile(const char *file_path)
 {
   MetaData metadata;
   int file_descriptor = open(file_path, O_RDONLY);
-  if (file_descriptor == -1) {
-    perror("open");
-    exit(-5);
-  }
+  if (file_descriptor == -1)
+    {
+      perror("open");
+      exit(-5);
+    }
 
   char line[BUFFER_SIZE];
   ssize_t bytes_read;
   while ((bytes_read = read(file_descriptor, line, sizeof(line))) > 0) // Reads a BUFFER_SIZE chunck from the file
     {
-      // check each line for the relevant data
-      if (strncmp(line, "Name:", 5) == 0) {
-	sscanf(line, "Name: %[^\n]", metadata.name);
-      } else if (strncmp(line, "Size:", 5) == 0) {
-	sscanf(line, "Size: %lld bytes", &metadata.size);
-      } else if (strncmp(line, "Inode:", 6) == 0) {
-	sscanf(line, "Inode: %llu", &metadata.inode);
-      } else if (strncmp(line, "Permissions:", 12) == 0) {
-	sscanf(line, "Permissions: %[^\n]", metadata.permissions);
+     
+      if (strstr(line, "Name:") != 0) {
+	char *name = strstr(line, "Name: ");
+	int i = strlen("Name: ");
+	int j = 0;
+	while(name[i] != '\n')
+	  {
+	    metadata.name[j++] = name[i++];
+	  }
+	metadata.name[j] = '\0';
       }
+      else
+	{
+	  perror("Snapshot file wrong format");
+	  exit(-4);
+	}
+      
+      if (strstr(line, "Size:") != 0) {
+	char *size = strstr(line, "Size: ");
+	char size_clean[50];
+	off_t offset = 0;
+	int i = strlen("Size: ");
+	int j = 0;
+	while(size[i] != ' ')
+	  {
+	    size_clean[j++] = size[i++];
+	  }
+	size_clean[j] = '\0';
+
+	offset = strtol(size_clean, NULL, 10);
+	metadata.size = offset;
+      }
+      else
+	{
+	  perror("Snapshot file wrong format");
+	  exit(-4);
+	}
+      
+      if (strstr(line, "Inode:") != 0) {
+        char *inode = strstr(line, "Inode: ");
+	char inode_clean[50];
+	ino_t ino = 0;
+	int i = strlen("Inode: ");
+	int j = 0;
+	while(inode[i] != '\n')
+	  {
+	    inode_clean[j++] = inode[i++];
+	  }
+	inode_clean[j] = '\0';
+
+	ino = strtol(inode_clean, NULL, 10);
+	metadata.inode = ino;
+      }
+      else
+	{
+	  perror("Snapshot file wrong format");
+	  exit(-4);
+	}
+      
+      if (strstr(line, "Permissions:") != 0) {
+        char *permissions = strstr(line, "Permissions: ");
+	int i = strlen("Permissions: ");
+	int j = 0;
+	while(permissions[i] != '\n')
+	  {
+	    metadata.permissions[j++] = permissions[i++];
+	  }
+	metadata.permissions[j] = '\0';
+      }
+      else
+	{
+	  perror("Snapshot file wrong format");
+	  exit(-4);
+	}
+      
+      if (strstr(line, "Last Modified: ") != 0) {
+        char *modif = strstr(line, "Last Modified: ");
+	int i = strlen("Last Modified: ");
+	int j = 0;
+	while(modif[i] != '\n')
+	  {
+	    metadata.modifiedChar[j++] = modif[i++];
+	  }
+	metadata.modifiedChar[j] = '\0';
+      }
+      else
+	{
+	  perror("Snapshot file wrong format");
+	  exit(-4);
+	}
+       
     }
     
-  strcpy(metadata.modifiedChar, "x"); // I don't care for this when i compare the two metadas
   strcpy(metadata.path, file_path);
   
   close(file_descriptor);
@@ -177,11 +259,10 @@ MetaData parseMetaDataFromFile(const char *file_path)
 int compareMetaData(MetaData new, MetaData old)
 {
   if(strcmp(new.name, old.name))  return 1;
-  
-  if(new.size != old.size) return 1;
-  if(new.inode != old.inode) return 1;
+  if(new.size != old.size)  return 1;
+  if(new.inode != old.inode)  return 1;
   if(strcmp(new.permissions, old.permissions)) return 1;
-
+  if(strcmp(new.modifiedChar, old.modifiedChar)) return 1;
   return 0;
 }
 
@@ -218,11 +299,12 @@ void makeSnapshot(char *path, MetaData metadata, char *output_dir)
     if(compareMetaData(newMetaData, metadata) != 0) // There are changes
       {
 	int file_descriptor = open(output_file_path, O_WRONLY);
-	if (file_descriptor == -1) {
-	  perror("open snapshot");
-	  exit(-4); 
-	}
-      
+	if (file_descriptor == -1)
+	  {
+	    perror("open snapshot");
+	    exit(-4); 
+	  }
+	
 	printMetaData(metadata, file_descriptor);
 	close(file_descriptor);
       }
@@ -267,10 +349,11 @@ int analyze_file(char *pathCurrent, char *izolated_space_dir)
       close(pipefd[0]);
 
       // Redirect STDOUT_FILENO to write end of the pipe
-      if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
-	perror("dup2");
-	exit(-1);
-      }
+      if (dup2(pipefd[1], STDOUT_FILENO) == -1)
+	{
+	  perror("dup2");
+	  exit(-1);
+	}
 
       // Close write end of the pipe
       close(pipefd[1]);
@@ -314,10 +397,11 @@ int analyze_file(char *pathCurrent, char *izolated_space_dir)
 	      snprintf(new_file_path, sizeof(new_file_path), "%s/%s", izolated_space_dir, file_name);
 
 	      // Move the file to the directory
-	      if (rename(pathCurrent, new_file_path) != 0) {
-		perror("rename");
-		exit(-4);
-	      }
+	      if (rename(pathCurrent, new_file_path) != 0)
+		{
+		  perror("rename");
+		  exit(-4);
+		}
     
 	      return 1;
 	    }
