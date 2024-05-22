@@ -1,6 +1,0 @@
-Path: test/directory/new/deep
-Name: deep
-Size: 17 bytes
-Last Modified: 2024-04-06 18:24:52
-Inode: 50413649
-Permissions: rw-r--r--
